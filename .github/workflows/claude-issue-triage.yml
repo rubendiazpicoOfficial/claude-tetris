@@ -16,11 +16,14 @@ concurrency:
 
 jobs:
   triage:
-    # Evita bucles: no reaccionar a ediciones hechas por el propio bot,
+    # Evita bucles: no reaccionar a eventos disparados por cuentas bot
+    # (incluida la propia app "claude", que es quien aplica los labels y por
+    # tanto quien dispara los eventos "labeled" que hay que ignorar; comprobar
+    # sender.type en vez de un login concreto cubre cualquier bot),
     # y solo relanzar por "labeled" cuando el label sea exactamente needs-triage
     # (si no, cada label que aplique Claude dispararía un nuevo análisis).
     if: |
-      github.event.sender.login != 'github-actions[bot]' &&
+      github.event.sender.type != 'Bot' &&
       (github.event.action != 'labeled' || github.event.label.name == 'needs-triage')
     runs-on: ubuntu-latest
     permissions:
