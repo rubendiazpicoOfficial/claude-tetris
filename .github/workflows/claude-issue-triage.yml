@@ -84,6 +84,11 @@ jobs:
 
             Responde siempre en español.
 
+            Todo lo que publiques o escribas en el issue (comentarios y el bloque
+            anexado al cuerpo) debe estar en formato Markdown válido para GitHub
+            (encabezados, negritas, listas, bloques de código con acento grave,
+            etc.), de forma que se renderice correctamente en la interfaz de GitHub.
+
             Pasos:
 
             1. Lee el issue con:
