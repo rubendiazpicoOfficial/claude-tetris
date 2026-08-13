@@ -1,0 +1,131 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    # Evita bucles: no reaccionar a ediciones hechas por el propio bot,
+    # y solo relanzar por "labeled" cuando el label sea exactamente needs-triage
+    # (si no, cada label que aplique Claude dispararía un nuevo análisis).
+    if: |
+      github.event.sender.login != 'github-actions[bot]' &&
+      (github.event.action != 'labeled' || github.event.label.name == 'needs-triage')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Ensure triage labels exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          create_label() {
+            gh label create "$1" --color "$2" --description "$3" --force
+          }
+
+          # Área (mapeada a la arquitectura de game.js descrita en CLAUDE.md)
+          create_label "area:gameplay" "5319e7" "Colisiones, rotación, wall kicks, spawn, game loop"
+          create_label "area:render"   "5319e7" "Canvas, dibujo, ghost piece"
+          create_label "area:ui"       "5319e7" "HUD, overlays, index.html/style.css"
+          create_label "area:input"    "5319e7" "Manejo de teclado"
+          create_label "area:scoring"  "5319e7" "Puntuación, líneas, nivel, velocidad"
+          create_label "area:tooling"  "5319e7" "Workflows, CI, documentación del repo"
+
+          # Prioridad
+          create_label "priority:high"   "b60205" "Bloquea el juego o afecta a todos los usuarios"
+          create_label "priority:medium" "fbca04" "Afecta la experiencia pero no bloquea"
+          create_label "priority:low"    "0e8a16" "Cosmético o de bajo impacto"
+
+          # Complejidad
+          create_label "complexity:low"    "c5def5" "Cambio pequeño y acotado"
+          create_label "complexity:medium" "c5def5" "Requiere tocar varias funciones/archivos"
+          create_label "complexity:high"   "c5def5" "Cambio estructural o de alto riesgo"
+
+          # Control del propio flujo de triaje
+          create_label "needs-triage" "ededed" "Añadir este label para relanzar el análisis automático"
+          create_label "triaged"      "ededed" "Ya fue analizado y etiquetado por Claude"
+
+      - name: Run Claude Issue Triage
+        id: claude-triage
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          claude_args: '--allowedTools "Read,Glob,Grep,Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*)"'
+
+          prompt: |
+            Analiza el issue #${{ github.event.issue.number }} de este repositorio
+            (un Tetris en JavaScript vanilla — ver CLAUDE.md para la arquitectura:
+            game.js contiene todo el estado y las funciones; PIECES, collide,
+            tryRotate, clearLines, loop, ghostY, spawn, endGame son las piezas clave).
+
+            Responde siempre en español.
+
+            Pasos:
+
+            1. Lee el issue con:
+               gh issue view ${{ github.event.issue.number }} --json title,body,labels,url
+
+            2. Explora el código del repositorio (game.js, style.css, index.html) para
+               entender qué componentes están relacionados con lo descrito en el issue.
+
+            3. Aplica labels con `gh issue edit ${{ github.event.issue.number }} --add-label "..."`
+               (y `--remove-label "needs-triage"` si estaba presente). Elige:
+               - Exactamente un tipo: bug, enhancement, documentation o question.
+               - Uno o más `area:*` (area:gameplay, area:render, area:ui, area:input,
+                 area:scoring, area:tooling) según el código afectado.
+               - Un `priority:*` (priority:high, priority:medium, priority:low).
+               - Un `complexity:*` (complexity:low, complexity:medium, complexity:high).
+               - Añade siempre `triaged` al terminar.
+
+               Si el issue es demasiado ambiguo o le falta información para diagnosticar,
+               usa el label `question` en vez de `bug`/`enhancement`, no inventes una causa,
+               y en el comentario pide explícitamente los datos que faltan (pasos de
+               reproducción, navegador, capturas, etc.).
+
+            4. Redacta un diagnóstico general con esta estructura (en Markdown):
+
+               ## Diagnóstico automático
+
+               **Resumen**: (1-2 frases reformulando el problema)
+
+               **Componentes afectados**: (archivos y funciones concretas, p.ej. `game.js: collide()`)
+
+               **Causa probable**: (hipótesis fundamentada en el código leído, o "No determinable
+               con la información disponible" si no hay suficientes datos)
+
+               **Reproducción**: (pasos, o qué falta para poder reproducirlo)
+
+               **Criterios de aceptación**: (qué debe cumplirse para considerar el issue resuelto)
+
+               **Riesgos / efectos colaterales**: (otras partes del código que podrían verse
+               afectadas al implementar la solución — p.ej. cambiar COLS/ROWS/BLOCK obliga a
+               actualizar el width/height del canvas en index.html)
+
+            5. Publica ese diagnóstico como comentario en el issue:
+               gh issue comment ${{ github.event.issue.number }} --body "..."
+
+            6. Anexa la misma sección al final del cuerpo del issue, delimitada por los
+               marcadores `<!-- claude-triage:v1 -->` y `<!-- /claude-triage:v1 -->`.
+               IMPORTANTE:
+               - No modifiques ni reordenes ni una sola línea del texto original del autor.
+               - Si el cuerpo actual ya contiene un bloque entre esos marcadores (de un
+                 análisis anterior), reemplázalo por completo con el nuevo diagnóstico;
+                 no lo dupliques.
+               - Usa `gh issue edit ${{ github.event.issue.number }} --body-file <archivo>`
+                 construyendo el archivo con el cuerpo original (sin el bloque previo, si
+                 existía) más el nuevo bloque delimitado al final.
