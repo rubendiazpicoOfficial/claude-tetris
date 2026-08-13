@@ -6,7 +6,13 @@ on:
 
 concurrency:
   group: issue-triage-${{ github.event.issue.number }}
-  cancel-in-progress: true
+  # cancel-in-progress se deja en false a propósito: el propio workflow
+  # dispara eventos "labeled" al aplicar labels, y si cancelase la ejecución
+  # en curso, mataría el análisis a mitad de camino (justo lo que ocurrió:
+  # los labels se aplicaban pero el comentario y la edición del cuerpo nunca
+  # llegaban a publicarse). Con cancel-in-progress:false esas ejecuciones
+  # auto-disparadas se encolan y terminan quedando "skipped" sin interferir.
+  cancel-in-progress: false
 
 jobs:
   triage:
